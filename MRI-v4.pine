@@ -9,7 +9,7 @@
 //   - Lines properly terminate when their setup cycle ends
 //   - Chart Y-axis scales correctly to visible price range
 //@version=6
-indicator("Momentum Reversal Indicator (MRI) v4", shorttitle="MRI", overlay=true, max_labels_count=500, max_lines_count=500, max_bars_back=500)
+indicator("Momentum Reversal Indicator (MRI) v4", shorttitle="MRI v4", overlay=true, max_labels_count=500, max_lines_count=500, max_bars_back=500)
 
 // ─── INPUTS ───────────────────────────────────────────────────────────────────
 
