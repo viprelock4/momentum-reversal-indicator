@@ -2,7 +2,7 @@
 // Based on TD Sequential by Tom DeMark, with extensions and multi-timeframe features
 // Credits: Larry Williams, Tom DeMark, Tyler Jenks, Martin Armstrong & Kevin O'Dowd
 //@version=6
-indicator("Momentum Reversal Indicator (MRI)", shorttitle="MRI", overlay=true, max_labels_count=500, max_lines_count=500, max_bars_back=500)
+indicator("Momentum Reversal Indicator (MRI) v1", shorttitle="MRI", overlay=true, max_labels_count=500, max_lines_count=500, max_bars_back=500)
 
 // ─── INPUTS ───────────────────────────────────────────────────────────────────
 
