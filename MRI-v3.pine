@@ -527,8 +527,11 @@ if showMTF and barstate.islast
 // ─── STATUS LINE ────────────────────────────────────────────────────────────
 
 // Matches: "MRI All C 1st Candle Prior Candle Last Candle Prior Candle X Day(s) Y Day(s) Z Month(s)"
+// Use a table in the status line area since plot title must be const string
 
-// Determine candle position descriptions for the status
+var table statusTbl = table.new(position.top_left, 1, 1, bgcolor=color.new(color.black, 100), border_width=0)
+
+// Determine candle position descriptions
 candleDesc(int count) =>
     count == 1 ? "1st Candle" : count == 9 ? "Last Candle" : count == 8 ? "Prior Candle" : "None"
 
@@ -544,7 +547,8 @@ if show1W and mtf1w_count == 9
 if show1M and mtf1m_count == 9
     mtfStatusParts := mtfStatusParts + " " + str.tostring(mtf1m_ctop > 0 ? mtf1m_ctop : mtf1m_cbot) + " Month(s)"
 
-plot(na, title="MRI " + extMode + " " + currentCandleDesc + " " + priorCandleDesc + mtfStatusParts, display=display.status_line, editable=false)
+statusText = "MRI " + extMode + " " + currentCandleDesc + " " + priorCandleDesc + mtfStatusParts
+table.cell(statusTbl, 0, 0, statusText, text_color=color.gray, text_size=size.small)
 
 
 // ─── ALERTS ─────────────────────────────────────────────────────────────────
