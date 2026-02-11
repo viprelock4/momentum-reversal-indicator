@@ -1,0 +1,588 @@
+// This Pine Script™ v6 indicator is a clone of the Momentum Reversal Indicator (MRI)
+// Based on TD Sequential by Tom DeMark, with extensions and multi-timeframe features
+// Credits: Larry Williams, Tom DeMark, Tyler Jenks, Martin Armstrong & Kevin O'Dowd
+//
+// v6 Changes:
+//   - FIXED: Bar 9 arrows now size.tiny (was size.small — way too big)
+//   - FIXED: Bar 9 shows ONLY arrow (no duplicate "9" label overlapping)
+//   - FIXED: Combined "C9"/"B9" labels replace arrow when extension fires on bar 9
+//   - FIXED: MTF display uses on-chart labels ("1D,1" format) like original MRI
+//   - FIXED: Breakout line width reduced from 2 to 1
+//   - FIXED: Consecutive count shown as small label near arrow, not stacked text
+//   - Overall: Much closer to original MRI minimal visual style
+//@version=6
+indicator("Momentum Reversal Indicator (MRI) v6", shorttitle="MRI v6", overlay=true, max_labels_count=500, max_lines_count=500, max_bars_back=500)
+
+// ─── INPUTS ───────────────────────────────────────────────────────────────────
+
+grpDisplay     = "Display Settings"
+showSetupNums  = input.bool(true, "Show Setup Numbers", group=grpDisplay)
+showSignals    = input.bool(true, "Show MRI Top/Bottom Arrows", group=grpDisplay)
+showWarning    = input.bool(true, "Show Orange Warning on Bar 8", group=grpDisplay)
+showConsCount  = input.bool(true, "Show Consecutive Count", group=grpDisplay)
+
+grpExt         = "Extension Settings"
+extMode        = input.string("All", "Extension Display", options=["All", "A", "B", "C", "B & C", "None"], group=grpExt)
+
+grpLines       = "Support / Resistance / Breakout Lines"
+showSRLines    = input.bool(true, "Show Support/Resistance Lines", group=grpLines)
+showBreakout   = input.bool(true, "Show Breakout Lines", group=grpLines)
+maxLines       = input.int(4, "Max S/R Lines Visible", minval=1, maxval=20, group=grpLines)
+
+grpMTF         = "Multi-Timeframe Display"
+showMTF        = input.bool(true, "Enable Multi-Timeframe", group=grpMTF)
+show1H         = input.bool(false, "Show 1H", group=grpMTF)
+show1D         = input.bool(true, "Show 1D", group=grpMTF)
+show1W         = input.bool(true, "Show 1W", group=grpMTF)
+show1M         = input.bool(true, "Show 1M", group=grpMTF)
+show1Y         = input.bool(false, "Show 12M (Yearly)", group=grpMTF)
+showCustomTF1  = input.bool(false, "Show Custom TF 1", group=grpMTF)
+customTF1      = input.timeframe("240", "Custom TF 1", group=grpMTF)
+showCustomTF2  = input.bool(false, "Show Custom TF 2", group=grpMTF)
+customTF2      = input.timeframe("120", "Custom TF 2", group=grpMTF)
+showCustomTF3  = input.bool(false, "Show Custom TF 3", group=grpMTF)
+customTF3      = input.timeframe("30", "Custom TF 3", group=grpMTF)
+
+// Derived extension visibility
+showExtA = extMode == "All" or extMode == "A"
+showExtB = extMode == "All" or extMode == "B" or extMode == "B & C"
+showExtC = extMode == "All" or extMode == "C" or extMode == "B & C"
+
+// Colors — matching original MRI palette
+color sellNumColor   = color.red
+color buyNumColor    = #00CC00
+color topArrowColor  = color.red
+color botArrowColor  = #00CC00
+color warnColor      = color.orange
+color srResColor     = color.red
+color srSupColor     = #00CC00
+color breakoutColorC = #0099FF
+color extAColor      = #00CCCC
+color extBColor      = #3399FF
+color extCColor      = #CC66FF
+
+
+// ─── TD SETUP PHASE (1-9 COUNT) ──────────────────────────────────────────────
+
+var int  setupCount     = 0
+var bool isSellSetup    = false
+var bool isBuySetup     = false
+var int  consecutiveTop = 0
+var int  consecutiveBot = 0
+
+bullFlip = close > close[4]
+bearFlip = close < close[4]
+
+if bullFlip
+    if isSellSetup
+        setupCount := setupCount + 1
+    else
+        setupCount := 1
+        isSellSetup := true
+        isBuySetup  := false
+else if bearFlip
+    if isBuySetup
+        setupCount := setupCount + 1
+    else
+        setupCount := 1
+        isBuySetup  := true
+        isSellSetup := false
+else
+    setupCount  := 0
+    isSellSetup := false
+    isBuySetup  := false
+
+sellSetupComplete = isSellSetup and setupCount == 9
+buySetupComplete  = isBuySetup  and setupCount == 9
+
+var int   sellSetupBar1Idx  = na
+var float sellSetupBar1High = na
+var int   buySetupBar1Idx   = na
+var float buySetupBar1Low   = na
+
+if isSellSetup and setupCount == 1
+    sellSetupBar1Idx  := bar_index
+    sellSetupBar1High := high
+if isBuySetup and setupCount == 1
+    buySetupBar1Idx := bar_index
+    buySetupBar1Low := low
+
+// Perfection check
+var bool sellPerfected = false
+var bool buyPerfected  = false
+
+if sellSetupComplete
+    h6 = high[3]
+    h7 = high[2]
+    sellPerfected := (high[1] >= h6 and high[1] >= h7) or (high >= h6 and high >= h7)
+if buySetupComplete
+    l6 = low[3]
+    l7 = low[2]
+    buyPerfected := (low[1] <= l6 and low[1] <= l7) or (low <= l6 and low <= l7)
+
+// Consecutive counting
+if sellSetupComplete
+    consecutiveTop := consecutiveTop + 1
+    consecutiveBot := 0
+if buySetupComplete
+    consecutiveBot := consecutiveBot + 1
+    consecutiveTop := 0
+
+
+// ─── EXTENSION STATE VARIABLES ──────────────────────────────────────────────
+
+var int   extA_sell_count  = 0, var bool  extA_sell_active = false, var float extA_sell_close8 = na
+var int   extA_buy_count   = 0, var bool  extA_buy_active  = false, var float extA_buy_close8  = na
+var int   extB_sell_count  = 0, var bool  extB_sell_active = false, var float extB_sell_close8 = na
+var int   extB_buy_count   = 0, var bool  extB_buy_active  = false, var float extB_buy_close8  = na
+var int   extC_sell_count  = 0, var bool  extC_sell_active = false, var float extC_sell_close8 = na
+var int   extC_buy_count   = 0, var bool  extC_buy_active  = false, var float extC_buy_close8  = na
+var float activeSellSR     = na
+var float activeBuySR      = na
+
+if sellSetupComplete
+    extA_sell_count := 0, extA_sell_active := true, extA_sell_close8 := na
+    extB_sell_count := 0, extB_sell_active := true, extB_sell_close8 := na
+    extC_sell_count := 0, extC_sell_active := true, extC_sell_close8 := na
+    activeSellSR := sellSetupBar1High
+    extA_buy_active := false, extB_buy_active := false, extC_buy_active := false
+
+if buySetupComplete
+    extA_buy_count := 0, extA_buy_active := true, extA_buy_close8 := na
+    extB_buy_count := 0, extB_buy_active := true, extB_buy_close8 := na
+    extC_buy_count := 0, extC_buy_active := true, extC_buy_close8 := na
+    activeBuySR := buySetupBar1Low
+    extA_sell_active := false, extB_sell_active := false, extC_sell_active := false
+
+
+// ─── EXTENSION A ────────────────────────────────────────────────────────────
+
+extA_sell_hit = false
+if extA_sell_active and close > high[2]
+    extA_sell_count := extA_sell_count + 1
+    extA_sell_hit   := true
+    if extA_sell_count == 8
+        extA_sell_close8 := close
+
+extA_sell_complete = false
+extA_sell_deferred = false
+if extA_sell_active and extA_sell_count == 13
+    if not na(extA_sell_close8) and close > extA_sell_close8
+        extA_sell_complete := true
+        extA_sell_active   := false
+    else
+        extA_sell_deferred := true
+        extA_sell_count    := extA_sell_count - 1
+
+extA_buy_hit = false
+if extA_buy_active and close < low[2]
+    extA_buy_count := extA_buy_count + 1
+    extA_buy_hit   := true
+    if extA_buy_count == 8
+        extA_buy_close8 := close
+
+extA_buy_complete = false
+extA_buy_deferred = false
+if extA_buy_active and extA_buy_count == 13
+    if not na(extA_buy_close8) and close < extA_buy_close8
+        extA_buy_complete := true
+        extA_buy_active   := false
+    else
+        extA_buy_deferred := true
+        extA_buy_count    := extA_buy_count - 1
+
+if extA_sell_active and not na(activeSellSR) and close < activeSellSR
+    extA_sell_active := false
+if extA_buy_active and not na(activeBuySR) and close > activeBuySR
+    extA_buy_active := false
+
+
+// ─── EXTENSION B ────────────────────────────────────────────────────────────
+
+extB_sell_hit = false
+if extB_sell_active and close > close[2]
+    extB_sell_count := extB_sell_count + 1
+    extB_sell_hit   := true
+    if extB_sell_count == 8
+        extB_sell_close8 := close
+
+extB_sell_complete = false
+extB_sell_deferred = false
+if extB_sell_active and extB_sell_count == 13
+    if not na(extB_sell_close8) and high >= extB_sell_close8
+        extB_sell_complete := true
+        extB_sell_active   := false
+    else
+        extB_sell_deferred := true
+        extB_sell_count    := extB_sell_count - 1
+
+extB_buy_hit = false
+if extB_buy_active and close < close[2]
+    extB_buy_count := extB_buy_count + 1
+    extB_buy_hit   := true
+    if extB_buy_count == 8
+        extB_buy_close8 := close
+
+extB_buy_complete = false
+extB_buy_deferred = false
+if extB_buy_active and extB_buy_count == 13
+    if not na(extB_buy_close8) and low <= extB_buy_close8
+        extB_buy_complete := true
+        extB_buy_active   := false
+    else
+        extB_buy_deferred := true
+        extB_buy_count    := extB_buy_count - 1
+
+if extB_sell_active and not na(activeSellSR) and close < activeSellSR
+    extB_sell_active := false
+if extB_buy_active and not na(activeBuySR) and close > activeBuySR
+    extB_buy_active := false
+
+
+// ─── EXTENSION C ────────────────────────────────────────────────────────────
+
+extC_sell_hit = false
+extC_sell_cond = extC_sell_active and close > high[2] and close > close[1]
+extC_sell_cond := extC_sell_cond and (extC_sell_count >= 10 or high > high[1])
+if extC_sell_active and extC_sell_count == 0 and close > high[2]
+    extC_sell_cond := true
+
+if extC_sell_cond
+    extC_sell_count := extC_sell_count + 1
+    extC_sell_hit   := true
+    if extC_sell_count == 8
+        extC_sell_close8 := close
+
+extC_sell_complete = false
+extC_sell_deferred = false
+if extC_sell_active and extC_sell_count == 13
+    if not na(extC_sell_close8) and high >= extC_sell_close8
+        extC_sell_complete := true
+        extC_sell_active   := false
+    else
+        extC_sell_deferred := true
+        extC_sell_count    := extC_sell_count - 1
+
+extC_buy_hit = false
+extC_buy_cond = extC_buy_active and close < low[2] and close < close[1]
+extC_buy_cond := extC_buy_cond and (extC_buy_count >= 10 or low < low[1])
+if extC_buy_active and extC_buy_count == 0 and close < low[2]
+    extC_buy_cond := true
+
+if extC_buy_cond
+    extC_buy_count := extC_buy_count + 1
+    extC_buy_hit   := true
+    if extC_buy_count == 8
+        extC_buy_close8 := close
+
+extC_buy_complete = false
+extC_buy_deferred = false
+if extC_buy_active and extC_buy_count == 13
+    if not na(extC_buy_close8) and low <= extC_buy_close8
+        extC_buy_complete := true
+        extC_buy_active   := false
+    else
+        extC_buy_deferred := true
+        extC_buy_count    := extC_buy_count - 1
+
+if extC_sell_active and not na(activeSellSR) and close < activeSellSR
+    extC_sell_active := false
+if extC_buy_active and not na(activeBuySR) and close > activeBuySR
+    extC_buy_active := false
+
+
+// ─── SUPPORT / RESISTANCE / BREAKOUT LINES (ARRAY-MANAGED) ─────────────────
+
+var array<line> srLines      = array.new<line>()
+var array<line> breakLines   = array.new<line>()
+var float lastResLevel       = na
+var float lastSupLevel       = na
+var bool  resBroken          = false
+var bool  supBroken          = false
+
+addLine(array<line> arr, line ln, int maxCount) =>
+    array.push(arr, ln)
+    while array.size(arr) > maxCount
+        old = array.shift(arr)
+        line.delete(old)
+
+// Resistance line on sell setup completion (red dotted)
+if sellSetupComplete and showSRLines
+    newLine = line.new(sellSetupBar1Idx, sellSetupBar1High, bar_index, sellSetupBar1High, color=srResColor, style=line.style_dotted, width=1, extend=extend.right)
+    addLine(srLines, newLine, maxLines)
+    lastResLevel := sellSetupBar1High
+    resBroken    := false
+
+// Support line on buy setup completion (green dotted)
+if buySetupComplete and showSRLines
+    newLine = line.new(buySetupBar1Idx, buySetupBar1Low, bar_index, buySetupBar1Low, color=srSupColor, style=line.style_dotted, width=1, extend=extend.right)
+    addLine(srLines, newLine, maxLines)
+    lastSupLevel := buySetupBar1Low
+    supBroken    := false
+
+// Breakout lines (blue solid, width=1) when price breaks S/R
+if showBreakout and not na(lastResLevel) and close > lastResLevel and not resBroken
+    newLine = line.new(bar_index, lastResLevel, bar_index + 1, lastResLevel, color=breakoutColorC, style=line.style_solid, width=1, extend=extend.right)
+    addLine(breakLines, newLine, maxLines)
+    resBroken := true
+
+if showBreakout and not na(lastSupLevel) and close < lastSupLevel and not supBroken
+    newLine = line.new(bar_index, lastSupLevel, bar_index + 1, lastSupLevel, color=breakoutColorC, style=line.style_solid, width=1, extend=extend.right)
+    addLine(breakLines, newLine, maxLines)
+    supBroken := true
+
+
+// ─── DETERMINE BAR 9 COMBINED LABELS ────────────────────────────────────────
+// Detect if extension fires on same bar as bar 9 for combined notation
+
+sell9_hasExt = false
+sell9_extLetter = ""
+if sellSetupComplete
+    if showExtC and extC_sell_hit and extC_sell_active
+        sell9_hasExt := true
+        sell9_extLetter := "C"
+    else if showExtB and extB_sell_hit and extB_sell_active
+        sell9_hasExt := true
+        sell9_extLetter := "B"
+    else if showExtA and extA_sell_hit and extA_sell_active
+        sell9_hasExt := true
+        sell9_extLetter := "A"
+
+buy9_hasExt = false
+buy9_extLetter = ""
+if buySetupComplete
+    if showExtC and extC_buy_hit and extC_buy_active
+        buy9_hasExt := true
+        buy9_extLetter := "C"
+    else if showExtB and extB_buy_hit and extB_buy_active
+        buy9_hasExt := true
+        buy9_extLetter := "B"
+    else if showExtA and extA_buy_hit and extA_buy_active
+        buy9_hasExt := true
+        buy9_extLetter := "A"
+
+// Whether to show plotshape arrow on bar 9 (skip if combined label like "C9" is shown instead)
+showSellArrow = showSignals and sellSetupComplete and not sell9_hasExt
+showBuyArrow  = showSignals and buySetupComplete  and not buy9_hasExt
+
+
+// ─── ORANGE WARNING ON BAR 8 ───────────────────────────────────────────────
+
+isBar8Sell = isSellSetup and setupCount == 8
+isBar8Buy  = isBuySetup  and setupCount == 8
+
+plotshape(showWarning and isBar8Sell, title="Sell Warning Bar 8", location=location.abovebar, style=shape.triangledown, color=warnColor, size=size.tiny)
+plotshape(showWarning and isBar8Buy, title="Buy Warning Bar 8", location=location.belowbar, style=shape.triangleup, color=warnColor, size=size.tiny)
+
+
+// ─── MRI TOP/BOTTOM SIGNALS (BAR 9) ────────────────────────────────────────
+
+// Tiny triangle arrows — only when NOT showing combined label (C9/B9/A9)
+plotshape(showSellArrow, title="MRI Top", location=location.abovebar, style=shape.triangledown, color=topArrowColor, size=size.tiny)
+plotshape(showBuyArrow, title="MRI Bottom", location=location.belowbar, style=shape.triangleup, color=botArrowColor, size=size.tiny)
+
+
+// ─── PLOT SETUP NUMBERS ────────────────────────────────────────────────────
+
+// Setup counts 1-8 as tiny labels
+if showSetupNums and setupCount >= 1 and setupCount <= 8
+    label.new(bar_index, isSellSetup ? high : low, str.tostring(setupCount), color=color.new(color.white, 100), textcolor=isSellSetup ? sellNumColor : buyNumColor, style=isSellSetup ? label.style_label_down : label.style_label_up, size=size.tiny)
+
+// Bar 9: show combined label ONLY when extension fires ("C9", "B9", "A9")
+// Otherwise the arrow alone marks bar 9 (no duplicate "9" label)
+if sellSetupComplete and sell9_hasExt
+    sellTxt = sell9_extLetter + "9"
+    if showConsCount and consecutiveTop > 1
+        sellTxt := str.tostring(consecutiveTop) + "\n" + sellTxt
+    label.new(bar_index, high, sellTxt, color=color.new(color.white, 100), textcolor=sellNumColor, style=label.style_label_down, size=size.tiny)
+else if sellSetupComplete and showConsCount and consecutiveTop > 1
+    // Show just the consecutive count near the arrow
+    label.new(bar_index, high, str.tostring(consecutiveTop), color=color.new(color.white, 100), textcolor=sellNumColor, style=label.style_label_down, size=size.tiny)
+
+if buySetupComplete and buy9_hasExt
+    buyTxt = buy9_extLetter + "9"
+    if showConsCount and consecutiveBot > 1
+        buyTxt := buyTxt + "\n" + str.tostring(consecutiveBot)
+    label.new(bar_index, low, buyTxt, color=color.new(color.white, 100), textcolor=buyNumColor, style=label.style_label_up, size=size.tiny)
+else if buySetupComplete and showConsCount and consecutiveBot > 1
+    label.new(bar_index, low, str.tostring(consecutiveBot), color=color.new(color.white, 100), textcolor=buyNumColor, style=label.style_label_up, size=size.tiny)
+
+
+// ─── PLOT EXTENSION LABELS ──────────────────────────────────────────────────
+
+// Skip extension label on bar 9 if already combined into "C9"/"B9"/"A9"
+sellBar9ExtHandled = sellSetupComplete
+buyBar9ExtHandled  = buySetupComplete
+
+// Extension A
+if showExtA and extA_sell_hit and extA_sell_active and not sellBar9ExtHandled
+    label.new(bar_index, high, str.tostring(extA_sell_count), color=color.new(color.white, 100), textcolor=extAColor, style=label.style_label_down, size=size.tiny)
+if showExtA and extA_sell_complete
+    label.new(bar_index, high, "A", color=color.new(color.white, 100), textcolor=extAColor, style=label.style_label_down, size=size.tiny)
+if showExtA and extA_sell_deferred
+    label.new(bar_index, high, "+", color=color.new(color.white, 100), textcolor=extAColor, style=label.style_label_down, size=size.tiny)
+if showExtA and extA_buy_hit and extA_buy_active and not buyBar9ExtHandled
+    label.new(bar_index, low, str.tostring(extA_buy_count), color=color.new(color.white, 100), textcolor=extAColor, style=label.style_label_up, size=size.tiny)
+if showExtA and extA_buy_complete
+    label.new(bar_index, low, "A", color=color.new(color.white, 100), textcolor=extAColor, style=label.style_label_up, size=size.tiny)
+if showExtA and extA_buy_deferred
+    label.new(bar_index, low, "+", color=color.new(color.white, 100), textcolor=extAColor, style=label.style_label_up, size=size.tiny)
+
+// Extension B
+if showExtB and extB_sell_hit and extB_sell_active and not sellBar9ExtHandled
+    label.new(bar_index, high, str.tostring(extB_sell_count), color=color.new(color.white, 100), textcolor=extBColor, style=label.style_label_down, size=size.tiny)
+if showExtB and extB_sell_complete
+    label.new(bar_index, high, "B", color=color.new(color.white, 100), textcolor=extBColor, style=label.style_label_down, size=size.tiny)
+if showExtB and extB_sell_deferred
+    label.new(bar_index, high, "+", color=color.new(color.white, 100), textcolor=extBColor, style=label.style_label_down, size=size.tiny)
+if showExtB and extB_buy_hit and extB_buy_active and not buyBar9ExtHandled
+    label.new(bar_index, low, str.tostring(extB_buy_count), color=color.new(color.white, 100), textcolor=extBColor, style=label.style_label_up, size=size.tiny)
+if showExtB and extB_buy_complete
+    label.new(bar_index, low, "B", color=color.new(color.white, 100), textcolor=extBColor, style=label.style_label_up, size=size.tiny)
+if showExtB and extB_buy_deferred
+    label.new(bar_index, low, "+", color=color.new(color.white, 100), textcolor=extBColor, style=label.style_label_up, size=size.tiny)
+
+// Extension C
+if showExtC and extC_sell_hit and extC_sell_active and not sellBar9ExtHandled
+    label.new(bar_index, high, str.tostring(extC_sell_count), color=color.new(color.white, 100), textcolor=extCColor, style=label.style_label_down, size=size.tiny)
+if showExtC and extC_sell_complete
+    label.new(bar_index, high, "C", color=color.new(color.white, 100), textcolor=extCColor, style=label.style_label_down, size=size.tiny)
+if showExtC and extC_sell_deferred
+    label.new(bar_index, high, "+", color=color.new(color.white, 100), textcolor=extCColor, style=label.style_label_down, size=size.tiny)
+if showExtC and extC_buy_hit and extC_buy_active and not buyBar9ExtHandled
+    label.new(bar_index, low, str.tostring(extC_buy_count), color=color.new(color.white, 100), textcolor=extCColor, style=label.style_label_up, size=size.tiny)
+if showExtC and extC_buy_complete
+    label.new(bar_index, low, "C", color=color.new(color.white, 100), textcolor=extCColor, style=label.style_label_up, size=size.tiny)
+if showExtC and extC_buy_deferred
+    label.new(bar_index, low, "+", color=color.new(color.white, 100), textcolor=extCColor, style=label.style_label_up, size=size.tiny)
+
+
+// ─── MULTI-TIMEFRAME MRI ───────────────────────────────────────────────────
+
+mriCalc() =>
+    _bull = close > close[4]
+    _bear = close < close[4]
+    var int _count = 0
+    var bool _isSell = false
+    var bool _isBuy  = false
+    var int _consTop = 0
+    var int _consBot = 0
+
+    if _bull
+        if _isSell
+            _count := _count + 1
+        else
+            _count  := 1
+            _isSell := true
+            _isBuy  := false
+    else if _bear
+        if _isBuy
+            _count := _count + 1
+        else
+            _count  := 1
+            _isBuy  := true
+            _isSell := false
+    else
+        _count  := 0
+        _isSell := false
+        _isBuy  := false
+
+    if _isSell and _count == 9
+        _consTop := _consTop + 1
+        _consBot := 0
+    if _isBuy and _count == 9
+        _consBot := _consBot + 1
+        _consTop := 0
+
+    [_count, _isSell ? 1 : 0, _isBuy ? 1 : 0, _consTop, _consBot]
+
+[mtf1h_count, mtf1h_sell, mtf1h_buy, mtf1h_ctop, mtf1h_cbot] = request.security(syminfo.tickerid, "60",  mriCalc())
+[mtf1d_count, mtf1d_sell, mtf1d_buy, mtf1d_ctop, mtf1d_cbot] = request.security(syminfo.tickerid, "1D",  mriCalc())
+[mtf1w_count, mtf1w_sell, mtf1w_buy, mtf1w_ctop, mtf1w_cbot] = request.security(syminfo.tickerid, "1W",  mriCalc())
+[mtf1m_count, mtf1m_sell, mtf1m_buy, mtf1m_ctop, mtf1m_cbot] = request.security(syminfo.tickerid, "1M",  mriCalc())
+[mtf1y_count, mtf1y_sell, mtf1y_buy, mtf1y_ctop, mtf1y_cbot] = request.security(syminfo.tickerid, "12M", mriCalc())
+[mtfC1_count, mtfC1_sell, mtfC1_buy, mtfC1_ctop, mtfC1_cbot] = request.security(syminfo.tickerid, customTF1, mriCalc())
+[mtfC2_count, mtfC2_sell, mtfC2_buy, mtfC2_ctop, mtfC2_cbot] = request.security(syminfo.tickerid, customTF2, mriCalc())
+[mtfC3_count, mtfC3_sell, mtfC3_buy, mtfC3_ctop, mtfC3_cbot] = request.security(syminfo.tickerid, customTF3, mriCalc())
+
+// MTF on-chart labels — positioned near the last bar, stacked vertically
+// Original MRI shows "1D,1" / "1W,4" / "1M,4" format with colored text
+var label[] mtfLabels = array.new<label>()
+
+if showMTF and barstate.islast
+    // Delete previous MTF labels
+    for i = 0 to array.size(mtfLabels) - 1
+        label.delete(array.get(mtfLabels, i))
+    array.clear(mtfLabels)
+
+    mtfOffset = 0  // vertical stack offset (in label positions)
+
+    mtfAddLabel(int count, int isSell, int isBuy, int consTop, int consBot, string tfName, int yOffset) =>
+        if count == 9
+            consVal = isSell == 1 ? consTop : consBot
+            clr = isSell == 1 ? color.red : #00CC00
+            txt = tfName + "," + str.tostring(consVal)
+            lbl = label.new(bar_index + 5, close, txt, color=color.new(color.white, 100), textcolor=clr, style=label.style_none, size=size.tiny, xloc=xloc.bar_index)
+            array.push(mtfLabels, lbl)
+            1
+        else
+            0
+
+    if show1H
+        mtfOffset := mtfOffset + mtfAddLabel(mtf1h_count, mtf1h_sell, mtf1h_buy, mtf1h_ctop, mtf1h_cbot, "1H", mtfOffset)
+    if show1D
+        mtfOffset := mtfOffset + mtfAddLabel(mtf1d_count, mtf1d_sell, mtf1d_buy, mtf1d_ctop, mtf1d_cbot, "1D", mtfOffset)
+    if show1W
+        mtfOffset := mtfOffset + mtfAddLabel(mtf1w_count, mtf1w_sell, mtf1w_buy, mtf1w_ctop, mtf1w_cbot, "1W", mtfOffset)
+    if show1M
+        mtfOffset := mtfOffset + mtfAddLabel(mtf1m_count, mtf1m_sell, mtf1m_buy, mtf1m_ctop, mtf1m_cbot, "1M", mtfOffset)
+    if show1Y
+        mtfOffset := mtfOffset + mtfAddLabel(mtf1y_count, mtf1y_sell, mtf1y_buy, mtf1y_ctop, mtf1y_cbot, "12M", mtfOffset)
+    if showCustomTF1
+        mtfOffset := mtfOffset + mtfAddLabel(mtfC1_count, mtfC1_sell, mtfC1_buy, mtfC1_ctop, mtfC1_cbot, customTF1, mtfOffset)
+    if showCustomTF2
+        mtfOffset := mtfOffset + mtfAddLabel(mtfC2_count, mtfC2_sell, mtfC2_buy, mtfC2_ctop, mtfC2_cbot, customTF2, mtfOffset)
+    if showCustomTF3
+        mtfOffset := mtfOffset + mtfAddLabel(mtfC3_count, mtfC3_sell, mtfC3_buy, mtfC3_ctop, mtfC3_cbot, customTF3, mtfOffset)
+
+    // Stack labels vertically by adjusting y position
+    atr = ta.atr(14)
+    if not na(atr) and array.size(mtfLabels) > 0
+        baseY = close - atr * 3
+        for i = 0 to array.size(mtfLabels) - 1
+            label.set_y(array.get(mtfLabels, i), baseY - atr * i * 0.8)
+
+
+// ─── STATUS LINE ────────────────────────────────────────────────────────────
+
+var table statusTbl = table.new(position.top_left, 1, 1, bgcolor=color.new(color.black, 100), border_width=0)
+
+candleDesc(int count) =>
+    count == 1 ? "1st Candle" : count == 9 ? "Last Candle" : count == 8 ? "Prior Candle" : "None"
+
+currentCandleDesc = setupCount >= 1 ? candleDesc(setupCount) : "None"
+priorCandleDesc   = setupCount >= 2 ? candleDesc(setupCount - 1) : "None"
+
+mtfStatusParts = ""
+if show1D and mtf1d_count == 9
+    mtfStatusParts := mtfStatusParts + " " + str.tostring(mtf1d_ctop > 0 ? mtf1d_ctop : mtf1d_cbot) + " Day(s)"
+if show1W and mtf1w_count == 9
+    mtfStatusParts := mtfStatusParts + " " + str.tostring(mtf1w_ctop > 0 ? mtf1w_ctop : mtf1w_cbot) + " Week(s)"
+if show1M and mtf1m_count == 9
+    mtfStatusParts := mtfStatusParts + " " + str.tostring(mtf1m_ctop > 0 ? mtf1m_ctop : mtf1m_cbot) + " Month(s)"
+
+statusText = "MRI " + extMode + " " + currentCandleDesc + " " + priorCandleDesc + mtfStatusParts
+table.cell(statusTbl, 0, 0, statusText, text_color=color.gray, text_size=size.small)
+
+
+// ─── ALERTS ─────────────────────────────────────────────────────────────────
+
+alertcondition(sellSetupComplete, title="MRI Top", message="MRI Top — Bullish trend may be ending")
+alertcondition(buySetupComplete, title="MRI Bottom", message="MRI Bottom — Bearish trend may be ending")
+alertcondition(isSellSetup and setupCount == 8, title="MRI Warning (Sell)", message="MRI Warning — Potential top on next candle")
+alertcondition(isBuySetup and setupCount == 8, title="MRI Warning (Buy)", message="MRI Warning — Potential bottom on next candle")
+alertcondition(extA_sell_complete or extA_buy_complete, title="Extension A Complete", message="MRI Extension A completed")
+alertcondition(extB_sell_complete or extB_buy_complete, title="Extension B Complete", message="MRI Extension B completed")
+alertcondition(extC_sell_complete or extC_buy_complete, title="Extension C Complete", message="MRI Extension C completed")
+alertcondition(consecutiveTop >= 2 and sellSetupComplete, title="Consecutive MRI Top", message="Consecutive MRI Top — Strong reversal signal")
+alertcondition(consecutiveBot >= 2 and buySetupComplete, title="Consecutive MRI Bottom", message="Consecutive MRI Bottom — Strong reversal signal")
