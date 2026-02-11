@@ -509,48 +509,43 @@ mriCalc() =>
 // Original MRI shows "1D,1" / "1W,4" / "1M,4" format with colored text
 var label[] mtfLabels = array.new<label>()
 
+// Build MTF text: each active timeframe on its own line
+mtfBuildText() =>
+    result = ""
+    if show1H and mtf1h_count == 9
+        consVal = mtf1h_sell == 1 ? mtf1h_ctop : mtf1h_cbot
+        result := result + (result != "" ? "\n" : "") + "1H," + str.tostring(consVal)
+    if show1D and mtf1d_count == 9
+        consVal = mtf1d_sell == 1 ? mtf1d_ctop : mtf1d_cbot
+        result := result + (result != "" ? "\n" : "") + "1D," + str.tostring(consVal)
+    if show1W and mtf1w_count == 9
+        consVal = mtf1w_sell == 1 ? mtf1w_ctop : mtf1w_cbot
+        result := result + (result != "" ? "\n" : "") + "1W," + str.tostring(consVal)
+    if show1M and mtf1m_count == 9
+        consVal = mtf1m_sell == 1 ? mtf1m_ctop : mtf1m_cbot
+        result := result + (result != "" ? "\n" : "") + "1M," + str.tostring(consVal)
+    if show1Y and mtf1y_count == 9
+        consVal = mtf1y_sell == 1 ? mtf1y_ctop : mtf1y_cbot
+        result := result + (result != "" ? "\n" : "") + "12M," + str.tostring(consVal)
+    if showCustomTF1 and mtfC1_count == 9
+        consVal = mtfC1_sell == 1 ? mtfC1_ctop : mtfC1_cbot
+        result := result + (result != "" ? "\n" : "") + customTF1 + "," + str.tostring(consVal)
+    if showCustomTF2 and mtfC2_count == 9
+        consVal = mtfC2_sell == 1 ? mtfC2_ctop : mtfC2_cbot
+        result := result + (result != "" ? "\n" : "") + customTF2 + "," + str.tostring(consVal)
+    if showCustomTF3 and mtfC3_count == 9
+        consVal = mtfC3_sell == 1 ? mtfC3_ctop : mtfC3_cbot
+        result := result + (result != "" ? "\n" : "") + customTF3 + "," + str.tostring(consVal)
+    result
+
+var label mtfLabel = na
+
 if showMTF and barstate.islast
-    // Delete previous MTF labels
-    for i = 0 to array.size(mtfLabels) - 1
-        label.delete(array.get(mtfLabels, i))
-    array.clear(mtfLabels)
-
-    mtfOffset = 0  // vertical stack offset (in label positions)
-
-    mtfAddLabel(int count, int isSell, int isBuy, int consTop, int consBot, string tfName, int yOffset) =>
-        if count == 9
-            consVal = isSell == 1 ? consTop : consBot
-            clr = isSell == 1 ? color.red : #00CC00
-            txt = tfName + "," + str.tostring(consVal)
-            lbl = label.new(bar_index + 5, close, txt, color=color.new(color.white, 100), textcolor=clr, style=label.style_none, size=size.tiny, xloc=xloc.bar_index)
-            array.push(mtfLabels, lbl)
-            1
-        else
-            0
-
-    if show1H
-        mtfOffset := mtfOffset + mtfAddLabel(mtf1h_count, mtf1h_sell, mtf1h_buy, mtf1h_ctop, mtf1h_cbot, "1H", mtfOffset)
-    if show1D
-        mtfOffset := mtfOffset + mtfAddLabel(mtf1d_count, mtf1d_sell, mtf1d_buy, mtf1d_ctop, mtf1d_cbot, "1D", mtfOffset)
-    if show1W
-        mtfOffset := mtfOffset + mtfAddLabel(mtf1w_count, mtf1w_sell, mtf1w_buy, mtf1w_ctop, mtf1w_cbot, "1W", mtfOffset)
-    if show1M
-        mtfOffset := mtfOffset + mtfAddLabel(mtf1m_count, mtf1m_sell, mtf1m_buy, mtf1m_ctop, mtf1m_cbot, "1M", mtfOffset)
-    if show1Y
-        mtfOffset := mtfOffset + mtfAddLabel(mtf1y_count, mtf1y_sell, mtf1y_buy, mtf1y_ctop, mtf1y_cbot, "12M", mtfOffset)
-    if showCustomTF1
-        mtfOffset := mtfOffset + mtfAddLabel(mtfC1_count, mtfC1_sell, mtfC1_buy, mtfC1_ctop, mtfC1_cbot, customTF1, mtfOffset)
-    if showCustomTF2
-        mtfOffset := mtfOffset + mtfAddLabel(mtfC2_count, mtfC2_sell, mtfC2_buy, mtfC2_ctop, mtfC2_cbot, customTF2, mtfOffset)
-    if showCustomTF3
-        mtfOffset := mtfOffset + mtfAddLabel(mtfC3_count, mtfC3_sell, mtfC3_buy, mtfC3_ctop, mtfC3_cbot, customTF3, mtfOffset)
-
-    // Stack labels vertically by adjusting y position
-    atr = ta.atr(14)
-    if not na(atr) and array.size(mtfLabels) > 0
-        baseY = close - atr * 3
-        for i = 0 to array.size(mtfLabels) - 1
-            label.set_y(array.get(mtfLabels, i), baseY - atr * i * 0.8)
+    if not na(mtfLabel)
+        label.delete(mtfLabel)
+    mtfText = mtfBuildText()
+    if mtfText != ""
+        mtfLabel := label.new(bar_index + 5, close, mtfText, color=color.new(color.white, 100), textcolor=color.white, style=label.style_none, size=size.tiny, textalign=text.align_left)
 
 
 // ─── STATUS LINE ────────────────────────────────────────────────────────────
